@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stone Puzzle Box</title>
+  <style>
+    body {
+      background: url('background.png') no-repeat center center fixed;
+      background-size: cover;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }
+
+    #box {
+      width: 400px;
+      margin: 60px auto 20px;
+      background: url('stone-box.png') no-repeat center/cover;
+      border: 8px solid #333;
+      border-radius: 15px;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .button, .light-container {
+      width: 100%;
+      height: 100%;
+      border: 2px solid black;
+      box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.8);
+      border-radius: 8px;
+      background-color: rgba(0, 0, 0, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .button {
+      cursor: pointer;
+    }
+
+    .button img, .light {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
+    #message {
+      margin-top: 20px;
+      font-size: 1.2em;
+      text-shadow: 1px 1px 2px #000;
+    }
+  </style>
+</head>
+<body>
+
+<div id="box"></div>
+<div id="message"></div>
+
+<!-- Audio Elements -->
+<audio id="pressSound" src="button-press.mp3" preload="auto"></audio>
+<audio id="successSound" src="success.mp3" preload="auto"></audio>
+<audio id="ambientSound" src="ambient.mp3" preload="auto" autoplay loop></audio>
+
+<script>
+  const box = document.getElementById("box");
+
+  const buttonToLightMap = [4, 2, 0, 5, 1, 3];
+  const correctOrder = [2, 4, 1, 0, 5, 3];
+
+  let currentStep = 0;
+  let lights = [false, false, false, false, false, false];
+
+  const pressSound = document.getElementById("pressSound");
+  const successSound = document.getElementById("successSound");
+
+  const buttonImages = [
+    'button1.png', 'button2.png', 'button3.png',
+    'button4.png', 'button5.png', 'button6.png'
+  ];
+
+  const lightImages = [
+    ['symbol1_off.png', 'symbol1_on.png'],
+    ['symbol2_off.png', 'symbol2_on.png'],
+    ['symbol3_off.png', 'symbol3_on.png'],
+    ['symbol4_off.png', 'symbol4_on.png'],
+    ['symbol5_off.png', 'symbol5_on.png'],
+    ['symbol6_off.png', 'symbol6_on.png']
+  ];
+
+  for (let i = 0; i < 6; i++) {
+    const btn = document.createElement('div');
+    btn.className = "button";
+    btn.onclick = () => pressButton(i);
+
+    const img = document.createElement('img');
+    img.src = buttonImages[i];
+    btn.appendChild(img);
+    box.appendChild(btn);
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const lightContainer = document.createElement('div');
+    lightContainer.className = "light-container";
+
+    const light = document.createElement('img');
+    light.src = lightImages[i][0];
+    light.className = 'light';
+    light.id = 'light' + i;
+
+    lightContainer.appendChild(light);
+    box.appendChild(lightContainer);
+  }
+
+  function resetPuzzle() {
+    lights.fill(false);
+    currentStep = 0;
+    for (let i = 0; i < 6; i++) {
+      document.getElementById("light" + buttonToLightMap[i]).src = lightImages[buttonToLightMap[i]][0];
+    }
+    document.getElementById("message").textContent = "Incorrect! Try again.";
+  }
+
+  function pressButton(index) {
+    pressSound.currentTime = 0;
+    pressSound.play();
+
+    const lightIndex = buttonToLightMap[index];
+    if (index === correctOrder[currentStep]) {
+      lights[lightIndex] = true;
+      document.getElementById("light" + lightIndex).src = lightImages[lightIndex][1];
+      currentStep++;
+      if (currentStep === 6) {
+        successSound.play();
+        window.location.href = "box-opened.html";
+      }
+    } else {
+      resetPuzzle();
+    }
+  }
+</script>
+
+</body>
+</html>
