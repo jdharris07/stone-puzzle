@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wizard Battle Prototype</title>
+<style>
+  body { font-family: system-ui; background:#111; color:#eee; text-align:center; }
+  #battle, #spellSelect { display:none; }
+  .spell-btn {
+    display:inline-block; margin:8px; padding:12px 20px;
+    background:#333; color:#eee; border:2px solid #555;
+    border-radius:12px; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+
+<h1>Wizard Battle Prototype</h1>
+
+<div id="create">
+  <input id="name" placeholder="Enter your wizard name">
+  <button onclick="createWizard()">Create Wizard</button>
+</div>
+
+<div id="profile"></div>
+
+<div id="spellSelect">
+  <h2>Spellbook</h2>
+  <ul id="spellList"></ul>
+  <button onclick="startBattle()">Start Test Battle</button>
+</div>
+
+<div id="battle">
+  <h2>Battle!</h2>
+  <p id="playerHP"></p>
+  <p id="enemyHP"></p>
+  <div id="castZone"></div>
+</div>
+
+<script>
+const allSpells = [
+  {name:"Fireball", dmg:15},
+  {name:"Shield", dmg:-10}, // heal instead of damage
+  {name:"Frost Wave", dmg:8},
+  {name:"Lightning Bolt", dmg:20},
+  {name:"Focus", dmg:-15}, // heal
+  {name:"Wild Surge", dmg:"random"}
+];
+
+let player = null;
+let enemy = null;
+
+function createWizard(){
+  const name = document.getElementById('name').value || "Unnamed Mage";
+  player = {
+    name, level:1, xp:0, xpToNext:100, hp:100,
+    spellbook: [...allSpells] // start with base 6
+  };
+  document.getElementById('create').style.display = "none";
+  document.getElementById('profile').innerHTML = `
+    <h2>Welcome, ${player.name}</h2>
+    <p>Level ${player.level} — XP ${player.xp}/${player.xpToNext}</p>
+  `;
+  const spellList = document.getElementById('spellList');
+  spellList.innerHTML = "";
+  player.spellbook.forEach(s => {
+    const li = document.createElement('li');
+    li.textContent = s.name;
+    spellList.appendChild(li);
+  });
+  document.getElementById('spellSelect').style.display = "block";
+}
+
+function startBattle(){
+  enemy = { name:"Training Dummy", hp:100 };
+  player.hp = 100;
+  document.getElementById('spellSelect').style.display = "none";
+  document.getElementById('battle').style.display = "block";
+  updateBattleUI();
+  nextSpell();
+}
+
+function updateBattleUI(){
+  document.getElementById('playerHP').textContent = `${player.name} HP: ${player.hp}`;
+  document.getElementById('enemyHP').textContent = `${enemy.name} HP: ${enemy.hp}`;
+}
+
+function nextSpell(){
+  if(player.hp<=0 || enemy.hp<=0){
+    endBattle();
+    return;
+  }
+  const s = player.spellbook[Math.floor(Math.random()*player.spellbook.length)];
+  const zone = document.getElementById('castZone');
+  zone.innerHTML = `
+    <p>Trace the symbol for: <strong>${s.name}</strong></p>
+    <button class="spell-btn" onclick="castSpell('${s.name}')">Cast ${s.name}</button>
+  `;
+}
+
+function castSpell(name){
+  const s = player.spellbook.find(sp=>sp.name===name);
+  let dmg = s.dmg==="random" ? (Math.random()<0.5?20:-10) : s.dmg;
+  if(dmg<0){
+    player.hp = Math.min(100, player.hp + Math.abs(dmg));
+  } else {
+    enemy.hp -= dmg;
+  }
+  // enemy auto attacks back
+  player.hp -= Math.floor(Math.random()*10+5);
+
+  updateBattleUI();
+  nextSpell();
+}
+
+function endBattle(){
+  const zone = document.getElementById('castZone');
+  if(player.hp>0){
+    zone.innerHTML = `<h3>You Win!</h3>`;
+    player.xp += 50;
+    if(player.xp>=player.xpToNext){
+      player.level++;
+      player.xp = 0;
+      player.xpToNext += 100;
+      alert("Level Up! You found a spell tome!");
+      // later: add random spell to book here
+    }
+  } else {
+    zone.innerHTML = `<h3>You Lose...</h3>`;
+  }
+  document.getElementById('profile').innerHTML = `
+    <h2>${player.name}</h2>
+    <p>Level ${player.level} — XP ${player.xp}/${player.xpToNext}</p>
+  `;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wizard Battle – Trace Casting Prototype</title>
+<style>
+  :root{
+    --bg:#0b0b0d; --panel:#151620; --text:#e9f0ff; --muted:#9fb0c8; --accent:#6bdcff; --good:#4be38f; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:980px;margin:0 auto;padding:24px}
+  h1,h2{margin:0 0 12px}
+  .card{background:var(--panel);border:1px solid #24263a;border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,.35);padding:16px}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .col{flex:1 1 300px}
+  .btn{background:#23263a;border:1px solid #2f3350;color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer}
+  .btn:hover{border-color:#3b4170}
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#20243a;border:1px solid #2c3152;color:var(--muted);font-size:12px}
+  #canvasWrap{position:relative}
+  #castCanvas{background:#0f111a;border:1px solid #2a2f4a;border-radius:12px;touch-action:none}
+  #ghostToggle{margin-left:8px;vertical-align:middle}
+  #log{max-height:180px;overflow:auto;font-family:ui-monospace,Consolas,monospace;background:#0f111a;border:1px solid #222842;border-radius:10px;padding:10px}
+  .hpbar{height:12px;background:#22273d;border-radius:999px;overflow:hidden;border:1px solid #2c3252}
+  .hpfill{height:100%;background:linear-gradient(90deg,#5bd694,#3ab07d)}
+  .section-title{opacity:.9;margin-top:8px}
+  .ghost{position:absolute;left:0;top:0;pointer-events:none}
+  .score{font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Wizard Battle – Trace Casting</h1>
+  <div class="row">
+    <div class="col card">
+      <h2 id="wizName">Wizard</h2>
+      <div><span class="pill" id="wizLevel"></span> <span class="pill" id="wizXP"></span></div>
+      <div class="section-title">Player HP</div>
+      <div class="hpbar"><div id="php" class="hpfill" style="width:100%"></div></div>
+      <div class="section-title" style="margin-top:10px">Enemy: Training Dummy</div>
+      <div class="hpbar"><div id="ehp" class="hpfill" style="width:100%"></div></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="startBtn">Start Test Battle</button>
+        <button class="btn" id="resetBtn">Reset Wizard (local)</button>
+      </div>
+    </div>
+
+    <div class="col card">
+      <h2>Current Spell</h2>
+      <div id="spellInfo">—</div>
+      <div style="margin:8px 0">
+        <label><input type="checkbox" id="ghostToggle" checked/> Show ghost guide</label>
+      </div>
+      <div id="canvasWrap">
+        <canvas id="castCanvas" width="420" height="420"></canvas>
+        <canvas id="ghostCanvas" width="420" height="420" class="ghost"></canvas>
+      </div>
+      <div style="margin-top:10px">Score: <span id="score" class="score">—</span></div>
+      <div id="hint" style="color:var(--muted);font-size:13px;margin-top:6px">Draw in one stroke. Release to cast.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Battle Log</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+/* --------------------------- Storage / Profile --------------------------- */
+const STARTING_SPELLS = [
+  { key:"fireball",   name:"Fireball",       base:10, type:"dmg"   },
+  { key:"shield",     name:"Shield",         base:10, type:"heal"  },
+  { key:"frost",      name:"Frost Wave",     base:7,  type:"dmg"   },
+  { key:"lightning",  name:"Lightning Bolt", base:14, type:"dmg"   },
+  { key:"focus",      name:"Focus",          base:10, type:"heal"  },
+  { key:"wild",       name:"Wild Surge",     base:16, type:"wild"  }
+];
+
+function loadWizard(){
+  let p = localStorage.getItem('wizardProfile');
+  if(!p){
+    // create default
+    p = {
+      name: "Apprentice",
+      level: 1, xp: 0, xpToNext: 100,
+      hpMax: 100,
+      spellbook: STARTING_SPELLS
+    };
+    localStorage.setItem('wizardProfile', JSON.stringify(p));
+    return p;
+  }
+  return JSON.parse(p);
+}
+function saveWizard(p){
+  localStorage.setItem('wizardProfile', JSON.stringify(p));
+}
+
+/* --------------------------- Basic UI Helpers --------------------------- */
+const wizName = document.getElementById('wizName');
+const wizLevel = document.getElementById('wizLevel');
+const wizXP = document.getElementById('wizXP');
+const php = document.getElementById('php');
+const ehp = document.getElementById('ehp');
+const logEl = document.getElementById('log');
+const spellInfo = document.getElementById('spellInfo');
+const scoreEl = document.getElementById('score');
+const ghostToggle = document.getElementById('ghostToggle');
+
+let player = loadWizard();
+let enemy = { name:"Training Dummy", hp:100, hpMax:100 };
+let inBattle = false;
+
+function uiProfile(){
+  wizName.textContent = player.name;
+  wizLevel.textContent = `Level ${player.level}`;
+  wizXP.textContent = `XP ${player.xp}/${player.xpToNext}`;
+}
+function uiHP(){
+  php.style.width = `${Math.max(0,(player.hp??player.hpMax)/player.hpMax*100)}%`;
+  ehp.style.width = `${Math.max(0,enemy.hp/enemy.hpMax*100)}%`;
+}
+function log(msg){ logEl.innerHTML = `<div>${msg}</div>` + logEl.innerHTML; }
+
+/* --------------------------- Gesture Utils ($1-ish) --------------------------- */
+const CANVAS_SIZE = 420;
+const NPOINTS = 64;
+
+function pathFromCtxPoints(pts){ return pts; }
+
+// resample polyline to N points
+function resample(pts, n=NPOINTS){
+  const I = pathLength(pts)/(n-1);
+  let D=0, newPts=[pts[0]];
+  for(let i=1;i<pts.length;i++){
+    const d = dist(pts[i-1], pts[i]);
+    if((D+d)>=I){
+      const t = (I - D)/d;
+      const q = { x: pts[i-1].x + t*(pts[i].x - pts[i-1].x),
+                  y: pts[i-1].y + t*(pts[i].y - pts[i-1].y) };
+      newPts.push(q);
+      pts.splice(i,0,q);
+      D=0;
+    } else D += d;
+  }
+  if(newPts.length===n-1) newPts.push(pts[pts.length-1]);
+  return newPts;
+}
+function pathLength(pts){
+  let d=0; for(let i=1;i<pts.length;i++) d+=dist(pts[i-1],pts[i]); return d;
+}
+function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+function centroid(pts){ let x=0,y=0; for(const p of pts){x+=p.x;y+=p.y} return {x:x/pts.length,y:y/pts.length}; }
+function indicativeAngle(pts){ const c=centroid(pts); return Math.atan2(c.y-pts[0].y, c.x-pts[0].x); }
+function rotateBy(pts, angle){
+  const c=centroid(pts), cos=Math.cos(angle), sin=Math.sin(angle);
+  return pts.map(p=>({x:(p.x-c.x)*cos - (p.y-c.y)*sin + c.x, y:(p.x-c.x)*sin + (p.y-c.y)*cos + c.y}));
+}
+function rotateTo(pts, targetAngle=0){ return rotateBy(pts, targetAngle - indicativeAngle(pts)); }
+function scaleTo(pts, size=300){
+  // scale to square, keep aspect
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const p of pts){ if(p.x<minX)minX=p.x; if(p.y<minY)minY=p.y; if(p.x>maxX)maxX=p.x; if(p.y>maxY)maxY=p.y; }
+  const w=maxX-minX, h=maxY-minY;
+  return pts.map(p=>({x:(p.x-minX)*(size/Math.max(w,1e-6)), y:(p.y-minY)*(size/Math.max(h,1e-6))}));
+}
+function translateTo(pts, target={x:0,y:0}){
+  const c=centroid(pts);
+  return pts.map(p=>({x:p.x - c.x + target.x, y:p.y - c.y + target.y}));
+}
+
+function pathDistance(a,b){
+  // average distance between corresponding points
+  let d=0; for(let i=0;i<a.length;i++) d+=dist(a[i],b[i]);
+  return d / a.length;
+}
+
+/* --------------------------- Spell Templates --------------------------- */
+/* Each template is a single-stroke path of points in a ~300x300 logical box centered later. */
+
+function template_circle(){
+  const pts=[], r=140, cx=210, cy=210, STEPS=80;
+  for(let i=0;i<=STEPS;i++){
+    const t=i/STEPS*2*Math.PI;
+    pts.push({x:cx+r*Math.cos(t), y:cy+r*Math.sin(t)});
+  }
+  return pts;
+}
+function template_zigzag(){
+  // lightning-like: down-right / down-left / down-right
+  const pts=[], start={x:70,y:60};
+  pts.push({...start});
+  pts.push({x:170,y:160});
+  pts.push({x:110,y:220});
+  pts.push({x:230,y:330});
+  pts.push({x:180,y:360});
+  // densify for smoother resample
+  return densify(pts, 12);
+}
+function template_arc(){
+  // shield arc: semi-circle U from left to right
+  const pts=[], r=150, cx=210, cy=190, STEPS=60;
+  for(let i=0;i<=STEPS;i++){
+    const t = Math.PI + (i/STEPS)*Math.PI; // 180° to 360°
+    pts.push({x:cx + r*Math.cos(t), y:cy + r*Math.sin(t)});
+  }
+  return pts;
+}
+function template_triangle(){
+  const pts=[
+    {x:210,y:60},{x:90,y:320},{x:330,y:320},{x:210,y:60}
+  ];
+  return densify(pts, 10);
+}
+function densify(pts, segSteps){
+  const out=[];
+  for(let i=0;i<pts.length-1;i++){
+    for(let s=0;s<=segSteps;s++){
+      const t=s/segSteps;
+      out.push({x:pts[i].x + t*(pts[i+1].x-pts[i].x),
+                y:pts[i].y + t*(pts[i+1].y-pts[i].y)});
+    }
+  }
+  return out;
+}
+
+/* Map spells to templates (a few test ones for now) */
+const SPELL_TEMPLATES = {
+  fireball:   template_circle,
+  lightning:  template_zigzag,
+  shield:     template_arc,
+  focus:      template_triangle,
+  // frost & wild can temporarily reuse shapes or be added later
+  frost:      template_arc,     // placeholder
+  wild:       template_zigzag   // placeholder
+};
+
+/* --------------------------- Canvas & Drawing --------------------------- */
+const canvas = document.getElementById('castCanvas');
+const ghost = document.getElementById('ghostCanvas');
+const ctx = canvas.getContext('2d');
+const gtx = ghost.getContext('2d');
+
+let drawing=false;
+let strokePts=[];    // raw points from this stroke
+let currentSpell=null;
+let currentTemplate=[]; // normalized template
+
+function clearCanvas(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+function drawStroke(points){
+  if(points.length<2) return;
+  ctx.lineWidth = 6;
+  ctx.lineCap='round';
+  ctx.lineJoin='round';
+  ctx.strokeStyle = '#6bdcff';
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for(let i=1;i<points.length;i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.stroke();
+}
+function drawGhost(points){
+  ghost.style.opacity = ghostToggle.checked ? 0.25 : 0.0;
+  gtx.clearRect(0,0,ghost.width,ghost.height);
+  if(!ghostToggle.checked || !points?.length) return;
+  gtx.lineWidth = 6;
+  gtx.lineCap='round';
+  gtx.lineJoin='round';
+  gtx.strokeStyle = '#7e84a8';
+  gtx.beginPath();
+  gtx.moveTo(points[0].x, points[0].y);
+  for(let i=1;i<points.length;i++) gtx.lineTo(points[i].x, points[i].y);
+  gtx.stroke();
+}
+
+function canvasPoint(e){
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.touches? e.touches[0].clientX : e.clientX) - rect.left;
+  const y = (e.touches? e.touches[0].clientY : e.clientY) - rect.top;
+  return {x, y};
+}
+function onDown(e){
+  if(!inBattle) return;
+  drawing=true; strokePts=[canvasPoint(e)];
+}
+function onMove(e){
+  if(!drawing) return;
+  strokePts.push(canvasPoint(e));
+  clearCanvas(); drawGhost(currentTemplate); drawStroke(strokePts);
+}
+function onUp(e){
+  if(!drawing) return;
+  drawing=false;
+  if(strokePts.length<8){ scoreEl.textContent = 'Too short'; return; }
+  castWithStroke(strokePts);
+}
+
+canvas.addEventListener('mousedown', onDown);
+canvas.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
+canvas.addEventListener('touchstart', (e)=>{e.preventDefault(); onDown(e);}, {passive:false});
+canvas.addEventListener('touchmove',  (e)=>{e.preventDefault(); onMove(e);}, {passive:false});
+canvas.addEventListener('touchend',   (e)=>{e.preventDefault(); onUp(e);},   {passive:false});
+
+/* --------------------------- Recognition & Scoring --------------------------- */
+function normalizePath(pts){
+  let p = resample(pts, NPOINTS);
+  p = rotateTo(p, 0);               // normalize rotation
+  p = scaleTo(p, 300);              // scale to box
+  p = translateTo(p, {x:CANVAS_SIZE/2, y:CANVAS_SIZE/2}); // center
+  return p;
+}
+function scoreStroke(userPts, tmplPts){
+  // Both inputs should be normalized (resample/rotate/scale/translate)
+  const d = pathDistance(userPts, tmplPts);
+  // Convert distance into score 0..1 using a soft curve
+  // empirical: with our sizing, d~0..160 typical; map ~0 => 1, ~160 => ~0
+  const maxD = 160;
+  let s = 1 - Math.min(d, maxD)/maxD;
+  // ease to reward good shapes more
+  s = Math.max(0, Math.min(1, Math.pow(s, 1.25)));
+  return s;
+}
+
+/* --------------------------- Battle Loop --------------------------- */
+function startBattle(){
+  inBattle=true;
+  player.hp = player.hpMax;
+  enemy = { name:"Training Dummy", hp:100, hpMax:100 };
+  logEl.innerHTML = '';
+  uiHP();
+  nextSpell();
+  clearCanvas(); drawGhost(currentTemplate);
+  scoreEl.textContent = '—';
+}
+
+function endBattle(){
+  inBattle=false;
+  clearCanvas(); drawGhost([]);
+  if(player.hp>0){
+    log(`<b>Victory!</b> +50 XP`);
+    player.xp += 50;
+    if(player.xp >= player.xpToNext){
+      player.level++;
+      player.xp = 0;
+      player.xpToNext += 100;
+      log(`<b>Level Up!</b> You feel your power grow.`);
+    }
+    saveWizard(player);
+    uiProfile();
+  } else {
+    log(`<b>Defeat...</b> Back to practice.`);
+  }
+}
+
+function nextSpell(){
+  if(player.hp<=0 || enemy.hp<=0){ endBattle(); return; }
+  // pick a random spell from the player's book (use the 4 with templates for now)
+  const eligible = player.spellbook.filter(s => SPELL_TEMPLATES[s.key]);
+  currentSpell = eligible[Math.floor(Math.random()*eligible.length)];
+  spellInfo.innerHTML = `<div><b>${currentSpell.name}</b> <span class="pill">${currentSpell.type}</span> <span class="pill">base ${currentSpell.base}</span></div>`;
+  // build template + normalize once
+  const maker = SPELL_TEMPLATES[currentSpell.key];
+  currentTemplate = normalizePath(maker());
+  clearCanvas(); drawGhost(currentTemplate);
+}
+
+function castWithStroke(rawStroke){
+  // normalize user stroke
+  const user = normalizePath(rawStroke);
+  const s = scoreStroke(user, currentTemplate); // 0..1
+  scoreEl.textContent = s.toFixed(2);
+
+  // compute effect power
+  let magnitude = Math.round(currentSpell.base * s);
+
+  if(currentSpell.type === 'dmg'){
+    enemy.hp = Math.max(0, enemy.hp - magnitude);
+    log(`You cast <b>${currentSpell.name}</b> for <span style="color:var(--good)">${magnitude}</span> damage (score ${s.toFixed(2)}).`);
+  } else if(currentSpell.type === 'heal'){
+    const before = player.hp;
+    player.hp = Math.min(player.hpMax, player.hp + magnitude);
+    log(`You cast <b>${currentSpell.name}</b> and heal <span style="color:var(--good)">${player.hp-before}</span> (score ${s.toFixed(2)}).`);
+  } else if(currentSpell.type === 'wild'){
+    // wild: 50% big dmg, 50% backfire heal (negative dmg as heal)
+    if(Math.random()<0.5){
+      enemy.hp = Math.max(0, enemy.hp - magnitude);
+      log(`Wild Surge blasts the foe for <span style="color:var(--good)">${magnitude}</span>! (score ${s.toFixed(2)})`);
+    } else {
+      const before = player.hp;
+      player.hp = Math.min(player.hpMax, player.hp + magnitude);
+      log(`Wild Surge fizzles into a heal for <span style="color:var(--good)">${player.hp-before}</span>. (score ${s.toFixed(2)})`);
+    }
+  }
+
+  // enemy counter hit (fixed for now)
+  if(enemy.hp>0){
+    const retaliate = 6 + Math.floor(Math.random()*6);
+    player.hp = Math.max(0, player.hp - retaliate);
+    log(`<span style="color:var(--bad)">${enemy.name}</span> hits you for ${retaliate}.`);
+  }
+
+  uiHP();
+
+  if(player.hp<=0 || enemy.hp<=0){ endBattle(); return; }
+  nextSpell();
+}
+
+/* --------------------------- Wire Up --------------------------- */
+document.getElementById('startBtn').addEventListener('click', startBattle);
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  localStorage.removeItem('wizardProfile');
+  player = loadWizard();
+  uiProfile(); uiHP();
+  log(`Wizard reset.`);
+});
+
+uiProfile();
+player.hp = player.hpMax;
+uiHP();
+nextSpell(); // preload a spell & ghost (battle isn’t active until Start)
+</script>
+</body>
+</html>
